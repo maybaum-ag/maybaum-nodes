@@ -29,14 +29,14 @@ function openDialog(node) {
     overlay.className = "maybaum-keys-overlay";
     overlay.innerHTML = `
         <div class="maybaum-keys">
-            <h3>OpenRouter-Keys</h3>
-            <p>Keys bleiben nur im Arbeitsspeicher von ComfyUI. Nach einem Neustart neu einfügen.</p>
+            <h3>OpenRouter keys</h3>
+            <p>Keys stay in ComfyUI's memory only. Add them again after a restart.</p>
             <div class="list"></div>
-            <input class="alias" placeholder="Alias, z. B. kunde-a" autocomplete="off">
-            <input class="key" type="password" placeholder="Key aus dem Keeper" autocomplete="off">
+            <input class="alias" placeholder="Alias, e.g. client-a" autocomplete="off">
+            <input class="key" type="password" placeholder="Key from Keeper" autocomplete="off">
             <div class="row">
-                <button class="save">Prüfen und speichern</button>
-                <button class="close">Schliessen</button>
+                <button class="save">Verify and save</button>
+                <button class="close">Close</button>
             </div>
             <div class="status"></div>
         </div>`;
@@ -64,7 +64,7 @@ function openDialog(node) {
     const renderList = (aliases) => {
         list.replaceChildren();
         if (!aliases.length) {
-            list.textContent = "Noch keine Keys geladen.";
+            list.textContent = "No keys loaded yet.";
             return;
         }
         for (const alias of aliases) {
@@ -73,7 +73,7 @@ function openDialog(node) {
             const name = document.createElement("span");
             name.textContent = alias;
             const remove = document.createElement("button");
-            remove.textContent = "Entfernen";
+            remove.textContent = "Remove";
             remove.addEventListener("click", async () => {
                 const res = await api.fetchApi(`/maybaum/openrouter/keys/${encodeURIComponent(alias)}`, { method: "DELETE" });
                 renderList(await res.json());
@@ -84,7 +84,7 @@ function openDialog(node) {
     };
 
     overlay.querySelector(".save").addEventListener("click", async () => {
-        status.textContent = "Prüfe Key ...";
+        status.textContent = "Verifying key ...";
         const res = await api.fetchApi("/maybaum/openrouter/keys", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -97,10 +97,10 @@ function openDialog(node) {
         }
         keyInput.value = "";
         aliasInput.value = "";
-        const parts = [`${data.alias} gespeichert`];
+        const parts = [`${data.alias} saved`];
         if (data.label) parts.push(`Label: ${data.label}`);
-        if (data.usage != null) parts.push(`Verbrauch: $${data.usage}`);
-        if (data.limit_remaining != null) parts.push(`Rest: $${data.limit_remaining}`);
+        if (data.usage != null) parts.push(`Usage: $${data.usage}`);
+        if (data.limit_remaining != null) parts.push(`Remaining: $${data.limit_remaining}`);
         status.textContent = parts.join(" · ");
         const widget = node.widgets?.find((w) => w.name === "alias");
         if (widget) {
@@ -118,7 +118,7 @@ app.registerExtension({
     name: "Maybaum.OpenRouterKeys",
     nodeCreated(node) {
         if (node.comfyClass !== "MaybaumOpenRouterKunde") return;
-        const button = node.addWidget("button", "Keys verwalten", null, () => openDialog(node), { serialize: false });
+        const button = node.addWidget("button", "Manage keys", null, () => openDialog(node), { serialize: false });
         button.serialize = false;
     },
 });

@@ -16,6 +16,7 @@ const NODES = {
             transparent_background: "toggle",
             batch: "max",
         },
+        cost: ["resolution", "quality", "batch"],
     },
     MaybaumOpenRouterVideo: {
         kind: "videos",
@@ -26,6 +27,7 @@ const NODES = {
             generate_audio: "keep",
             seed: "keep",
         },
+        cost: ["duration", "resolution", "generate_audio"],
     },
 };
 const CACHE_MS = 10 * 60 * 1000;
@@ -56,6 +58,27 @@ function setHidden(node, widget, hidden) {
     node.setSize([node.size[0], node.size[1] + (hidden ? -height : height)]);
 }
 
+function connected(node, test) {
+    return (node.inputs ?? []).filter((i) => i.link != null && test(i.name)).length;
+}
+
+async function updateCost(node, config) {
+    const model = node.widgets?.find((w) => w.name === "model")?.value;
+    if (!model) return;
+    const values = {
+        references: connected(node, (name) => name.startsWith("reference_images.")),
+        frames: connected(node, (name) => name === "first_frame" || name === "last_frame"),
+    };
+    for (const name of config.cost) values[name] = node.widgets.find((w) => w.name === name)?.value;
+    const request = JSON.stringify({ model, values });
+    node.maybaumCostRequest = request;
+    const res = await api.fetchApi(`/maybaum/openrouter/estimate/${config.kind}`, { method: "POST", body: request });
+    // Nur die letzte Anfrage zählt, ältere Antworten können später eintreffen.
+    if (node.maybaumCostRequest !== request) return;
+    node.maybaumCost = res.ok ? (await res.json()).text : "";
+    node.setDirtyCanvas(true, true);
+}
+
 async function syncOptions(node, config) {
     const model = node.widgets?.find((w) => w.name === "model");
     if (!model) return;
@@ -79,6 +102,7 @@ async function syncOptions(node, config) {
         for (const w of [widget, ...(widget.linkedWidgets ?? [])]) setHidden(node, w, !cap);
     }
     node.setDirtyCanvas(true, true);
+    updateCost(node, config);
 }
 
 app.registerExtension({
@@ -95,6 +119,23 @@ app.registerExtension({
             syncOptions(node, config);
             return result;
         };
+        for (const name of config.cost) {
+            const widget = node.widgets.find((w) => w.name === name);
+            if (!widget) continue;
+            const widgetCallback = widget.callback;
+            widget.callback = function (...args) {
+                const result = widgetCallback?.apply(this, args);
+                updateCost(node, config);
+                return result;
+            };
+        }
+        const onConnectionsChange = node.onConnectionsChange;
+        node.onConnectionsChange = function (...args) {
+            const result = onConnectionsChange?.apply(this, args);
+            updateCost(node, config);
+            return result;
+        };
+        node.badges.push(() => new LGraphBadge({ text: node.maybaumCost || "", bgColor: "#35553a", fgColor: "#ffffff" }));
         const onConfigure = node.onConfigure;
         node.onConfigure = function (...args) {
             const result = onConfigure?.apply(this, args);

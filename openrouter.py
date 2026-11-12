@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 
 import requests
@@ -13,6 +14,8 @@ _keys = {}
 # kind ("images" | "videos") -> (Ladezeit, {model_id: Modelleintrag aus /{kind}/models})
 _models = {}
 MODELS_TTL = 10 * 60
+# model_id -> (Ladezeit, Endpoints mit Preisen) für Bildmodelle. Videopreise stehen direkt in der Modellliste.
+_endpoints = {}
 # Ausgabeformate, die als IMAGE dekodiert werden können. SVG nicht.
 RASTER_FORMATS = ("png", "jpeg", "webp")
 
@@ -20,7 +23,7 @@ RASTER_FORMATS = ("png", "jpeg", "webp")
 def check_alias(alias):
     if alias in _keys:
         return True
-    return f"Key für Kunde '{alias}' nicht geladen. Auf der Node «OpenRouter API» unter «Keys verwalten» einfügen."
+    return f"Key for client '{alias}' not loaded. Add it on the «OpenRouter API» node via «Manage keys»."
 
 
 def request(alias, method, path, timeout=600, **kwargs):
@@ -104,21 +107,118 @@ def check_options(kind, model, **values):
     try:
         models = _load_models(kind)
     except requests.RequestException as e:
-        return f"Modellliste von OpenRouter nicht ladbar: {type(e).__name__}"
+        return f"Could not load model list from OpenRouter: {type(e).__name__}"
     if model not in models:
-        return f"Modell '{model}' ist bei OpenRouter nicht verfügbar."
+        return f"Model '{model}' is not available on OpenRouter."
     caps = capabilities(kind, model)
     for name, value in values.items():
         if name == "batch":
             if not 1 <= value <= caps.get("batch", 1):
-                return f"batch {value}: Modell '{model}' erlaubt 1 bis {caps.get('batch', 1)}."
+                return f"batch {value}: model '{model}' allows 1 to {caps.get('batch', 1)}."
         elif isinstance(value, bool):
             if value and name not in caps:
-                return f"{name}: Modell '{model}' unterstützt das nicht."
+                return f"{name}: model '{model}' does not support this."
         elif value != "auto" and value not in caps.get(name, []):
             allowed = ", ".join(["auto", *caps.get(name, [])])
-            return f"{name} '{value}' ist bei Modell '{model}' nicht möglich. Erlaubt: {allowed}."
+            return f"{name} '{value}' is not possible with model '{model}'. Allowed: {allowed}."
     return True
+
+
+def _load_endpoints(model):
+    loaded, endpoints = _endpoints.get(model, (0, None))
+    if endpoints is not None and time.time() - loaded < MODELS_TTL:
+        return endpoints
+    res = requests.get(f"{API_URL}/images/models/{model}/endpoints", headers=HEADERS, timeout=15)
+    res.raise_for_status()
+    _endpoints[model] = (time.time(), res.json()["endpoints"])
+    return _endpoints[model][1]
+
+
+def _prefer(items, *keeps):
+    """Schränkt nacheinander ein. Ein Filter ohne Treffer wird übersprungen."""
+    for keep in keeps:
+        items = [i for i in items if keep(i)] or items
+    return items
+
+
+def _usd(value):
+    return f"${value:.3f}" if value < 0.1 else f"${value:.2f}"
+
+
+def _span(prices, suffix=""):
+    low, high = min(prices), max(prices)
+    if high - low < 0.0005:
+        return _usd(low) + suffix
+    return f"{_usd(low)}-{_usd(high)[1:]}{suffix}"
+
+
+def _image_estimate(model, resolution, quality, batch, references):
+    totals, extras, others = [], [], set()
+    for endpoint in _load_endpoints(model):
+        pricing = endpoint.get("pricing") or []
+        outputs = [p for p in pricing if p["billable"] == "output_image" and p["unit"] == "image"]
+        # variant: None = Grundpreis, "2k" oder "low_2k" = Auflösung (mit Qualität). Zuschläge wie "moodboards" ignorieren.
+        sized = [p for p in outputs if p.get("variant") and re.fullmatch(r"(\w+_)?(768|[\d.]+k)", p["variant"])]
+        base = [p for p in outputs if not p.get("variant")]
+        if quality != "auto":
+            sized = _prefer(sized, lambda p: p["variant"].startswith(quality + "_"))
+        if resolution != "auto":
+            chosen = [p for p in sized if p["variant"].split("_")[-1] == resolution.lower()] or base
+        else:
+            chosen = base or sized
+        if chosen:
+            totals.append([p["cost_usd"] * batch for p in chosen])
+            per_reference = sum(p["cost_usd"] for p in pricing if p["billable"] in ("input_image", "input_reference") and p["unit"] == "image" and not p.get("variant"))
+            extras.append(per_reference * references)
+            continue
+        for p in pricing:
+            if p["billable"] == "output_image" and p["unit"] == "megapixel":
+                others.add(f"{_usd(p['cost_usd'])}/megapixel")
+            elif p["billable"] == "output_image" and p["unit"] == "token":
+                others.add("Token pricing, cost known after run")
+    if totals:
+        return "~" + _span([t + e for prices, e in zip(totals, extras) for t in prices])
+    return " · ".join(sorted(others))
+
+
+def _video_estimate(model, duration, resolution, generate_audio, frames, references):
+    entry = _load_models("videos").get(model, {})
+    rates = []
+    image_input = 0.0
+    minimum = 0.0
+    for key, value in (entry.get("pricing_skus") or {}).items():
+        usd = float(value) / (100 if "cents" in key else 1)
+        if key in ("cents_per_image_input", "reference_images", "reference_input_images"):
+            image_input += usd
+        elif key == "minimum_cents_per_generation":
+            minimum = usd
+        elif match := re.fullmatch(r"(?:(text_to_video|image_to_video)_)?(?:duration_seconds|cents_per_second_output|cents_per_video_output_second)(?:_(with_audio|without_audio))?(?:_(\d+p|\d+k))?", key):
+            mode, audio, res = match.groups()
+            rates.append({"usd": usd, "mode": mode, "audio": audio, "res": res})
+    if not rates:
+        if any(k.startswith("video_tokens") for k in entry.get("pricing_skus") or {}):
+            return "Video token pricing, cost known after run"
+        return ""
+    if resolution != "auto":
+        rates = _prefer(rates, lambda r: r["res"] == resolution.lower(), lambda r: r["res"] is None)
+    else:
+        rates = _prefer(rates, lambda r: r["res"] is None)
+    if entry.get("generate_audio") and generate_audio:
+        rates = _prefer(rates, lambda r: r["audio"] == "with_audio", lambda r: r["audio"] is None)
+    else:
+        rates = _prefer(rates, lambda r: r["audio"] == "without_audio", lambda r: r["audio"] is None)
+    rates = _prefer(rates, lambda r: r["mode"] == ("image_to_video" if frames else "text_to_video"), lambda r: r["mode"] is None)
+    extra = image_input * (frames + references)
+    if duration == "auto":
+        return _span([r["usd"] for r in rates], "/s") + " · duration auto"
+    return "~" + _span([max(r["usd"] * int(duration) + extra, minimum) for r in rates])
+
+
+def estimate(kind, model, values):
+    """Kostenschätzung pro Run als Text, leer wenn OpenRouter keine Preise liefert."""
+    if kind == "images":
+        return _image_estimate(model, values["resolution"], values["quality"], int(values["batch"]), int(values["references"]))
+    return _video_estimate(model, values["duration"], values["resolution"], values["generate_audio"], int(values["frames"]), int(values["references"]))
 
 
 routes = PromptServer.instance.routes
@@ -135,10 +235,10 @@ async def add_key(request):
     alias = str(data.get("alias", "")).strip()
     key = str(data.get("key", "")).strip()
     if not alias or not key:
-        return web.json_response({"error": "Alias und Key angeben."}, status=400)
+        return web.json_response({"error": "Enter alias and key."}, status=400)
     res = await asyncio.to_thread(requests.get, f"{API_URL}/key", headers={**HEADERS, "Authorization": f"Bearer {key}"}, timeout=15)
     if not res.ok:
-        return web.json_response({"error": f"OpenRouter lehnt den Key ab (Status {res.status_code})."}, status=400)
+        return web.json_response({"error": f"OpenRouter rejected the key (status {res.status_code})."}, status=400)
     _keys[alias] = key
     info = res.json().get("data", {})
     return web.json_response({"alias": alias, "label": info.get("label"), "limit": info.get("limit"), "limit_remaining": info.get("limit_remaining"), "usage": info.get("usage")})
@@ -166,3 +266,16 @@ async def list_capabilities(request):
         raise web.HTTPNotFound()
     caps = await asyncio.to_thread(lambda: {m: capabilities(kind, m) for m in _load_models(kind)})
     return web.json_response(caps)
+
+
+@routes.post("/maybaum/openrouter/estimate/{kind}")
+async def get_estimate(request):
+    kind = request.match_info["kind"]
+    if kind not in ("images", "videos"):
+        raise web.HTTPNotFound()
+    data = await request.json()
+    try:
+        text = await asyncio.to_thread(estimate, kind, data["model"], data["values"])
+    except requests.RequestException:
+        text = ""
+    return web.json_response({"text": text})

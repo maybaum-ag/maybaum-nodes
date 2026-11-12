@@ -6,8 +6,8 @@ import requests
 import torch
 
 import comfy.model_management
-from comfy_api.latest import InputImpl, io
-from comfy_api_nodes.util.conversions import bytesio_to_image_tensor, tensor_to_data_uri
+from comfy_api.latest import InputImpl, Types, io
+from comfy_api_nodes.util.conversions import bytesio_to_image_tensor, tensor_to_data_uri, video_to_base64_string
 
 from . import openrouter
 
@@ -26,7 +26,7 @@ def model_input(kind):
         "model",
         options=[],
         remote=io.RemoteOptions(route=f"/maybaum/openrouter/models/{kind}", refresh_button=True),
-        tooltip="Live-Liste von OpenRouter.",
+        tooltip="Live list from OpenRouter.",
     )
 
 
@@ -34,7 +34,7 @@ def reference_input():
     return io.Autogrow.Input(
         "reference_images",
         template=io.Autogrow.TemplatePrefix(io.Image.Input("image"), prefix="image_", min=0, max=16),
-        tooltip="Referenzbilder. Jeder Eingang nimmt auch einen ganzen Batch, jedes Bild darin wird eine eigene Referenz.",
+        tooltip="Reference images. Each input also accepts a whole batch, every image in it becomes its own reference.",
     )
 
 
@@ -43,9 +43,9 @@ def image_urls(images):
 
 
 def format_info(kunde, model, usage, start):
-    parts = [f"Kunde: {kunde}", f"Modell: {model}", f"Zeit: {time.time() - start:.1f} s"]
+    parts = [f"Client: {kunde}", f"Model: {model}", f"Time: {time.time() - start:.1f} s"]
     if usage and usage.get("cost") is not None:
-        parts.append(f"Kosten: ${float(usage['cost']):.4f}")
+        parts.append(f"Cost: ${float(usage['cost']):.4f}")
     return " · ".join(parts)
 
 
@@ -56,16 +56,16 @@ class MaybaumOpenRouterKunde(io.ComfyNode):
             node_id="MaybaumOpenRouterKunde",
             display_name="OpenRouter API",
             category="Maybaum",
-            description="Wählt den OpenRouter-Key eines Kunden. Keys liegen nur im RAM und gehen bei einem Neustart verloren.",
+            description="Selects the OpenRouter key of a client. Keys live only in RAM and are lost on restart.",
             inputs=[
                 io.Combo.Input(
                     "alias",
                     options=[],
                     remote=io.RemoteOptions(route="/maybaum/openrouter/aliases", refresh_button=True, refresh=1000),
-                    tooltip="Kunden-Alias. Keys über «Keys verwalten» einfügen.",
+                    tooltip="Client alias. Add keys via «Manage keys».",
                 ),
             ],
-            outputs=[Kunde.Output(display_name="kunde")],
+            outputs=[Kunde.Output(display_name="client")],
         )
 
     @classmethod
@@ -84,18 +84,18 @@ class MaybaumOpenRouterImage(io.ComfyNode):
             node_id="MaybaumOpenRouterImage",
             display_name="OpenRouter Image",
             category="Maybaum",
-            description="Bildgenerierung über OpenRouter (/api/v1/images). Optionen erscheinen nur, wenn das Modell sie unterstützt.",
+            description="Image generation via OpenRouter (/api/v1/images). Options appear only if the model supports them.",
             inputs=[
-                Kunde.Input("kunde"),
+                Kunde.Input("kunde", display_name="client"),
                 io.String.Input("prompt", multiline=True),
                 model_input("images"),
                 io.Combo.Input("aspect_ratio", options=IMAGE_ASPECT_RATIOS),
                 io.Combo.Input("resolution", options=["auto", "512", "768", "1K", "1.5K", "2K", "4K"]),
                 io.Combo.Input("quality", options=["auto", "low", "medium", "high", "xhigh", "max"]),
                 io.Int.Input("seed", default=0, min=0, max=2147483647, control_after_generate=True),
-                io.Combo.Input("output_format", options=["auto", "png", "jpeg", "webp"], tooltip="Format, in dem das Modell liefert. Kein Einfluss auf den Ausgang IMAGE."),
-                io.Boolean.Input("transparent_background", default=False, tooltip="Die Transparenz kommt als Maske am Ausgang «mask»."),
-                io.Int.Input("batch", default=1, min=1, max=10, tooltip="Anzahl Bilder pro Request. Manche Modelle liefern weniger."),
+                io.Combo.Input("output_format", options=["auto", "png", "jpeg", "webp"], tooltip="Format the model delivers. Does not affect the IMAGE output."),
+                io.Boolean.Input("transparent_background", default=False, tooltip="Transparency is returned as a mask on the «mask» output."),
+                io.Int.Input("batch", default=1, min=1, max=10, tooltip="Images per request. Some models return fewer."),
                 reference_input(),
             ],
             outputs=[io.Image.Output(), io.String.Output(display_name="info"), io.Mask.Output(display_name="mask")],
@@ -104,7 +104,7 @@ class MaybaumOpenRouterImage(io.ComfyNode):
     @classmethod
     def validate_inputs(cls, model, aspect_ratio, resolution, quality, output_format, transparent_background, batch, reference_images=None):
         if transparent_background and output_format == "jpeg":
-            return "Transparenter Hintergrund geht nicht mit output_format jpeg."
+            return "Transparent background does not work with output_format jpeg."
         return openrouter.check_options(
             "images", model, aspect_ratio=aspect_ratio, resolution=resolution, quality=quality,
             output_format=output_format, transparent_background=transparent_background, batch=batch,
@@ -137,7 +137,7 @@ class MaybaumOpenRouterImage(io.ComfyNode):
             images.append(image[..., :3])
         info = format_info(kunde, model, data.get("usage"), start)
         if batch > 1:
-            info += f" · Bilder: {len(images)}"
+            info += f" · Images: {len(images)}"
         return io.NodeOutput(torch.cat(images), info, torch.cat(masks))
 
 
@@ -148,18 +148,19 @@ class MaybaumOpenRouterVideo(io.ComfyNode):
             node_id="MaybaumOpenRouterVideo",
             display_name="OpenRouter Video",
             category="Maybaum",
-            description="Videogenerierung über OpenRouter (/api/v1/videos, asynchron). Optionen erscheinen nur, wenn das Modell sie unterstützt.",
+            description="Video generation via OpenRouter (/api/v1/videos, asynchronous). Options appear only if the model supports them.",
             inputs=[
-                Kunde.Input("kunde"),
+                Kunde.Input("kunde", display_name="client"),
                 io.String.Input("prompt", multiline=True),
                 model_input("videos"),
-                io.Combo.Input("duration", options=VIDEO_DURATIONS, tooltip="Sekunden."),
+                io.Combo.Input("duration", options=VIDEO_DURATIONS, tooltip="Seconds."),
                 io.Combo.Input("resolution", options=["auto", "480p", "720p", "768p", "1080p", "2K", "4K"]),
                 io.Combo.Input("aspect_ratio", options=VIDEO_ASPECT_RATIOS),
                 io.Boolean.Input("generate_audio", default=True),
                 io.Int.Input("seed", default=0, min=0, max=2147483647, control_after_generate=True),
                 io.Image.Input("first_frame", optional=True),
                 io.Image.Input("last_frame", optional=True),
+                io.Video.Input("reference_video", optional=True, tooltip="Reference video. Only models that support video references use it, others ignore it."),
                 reference_input(),
             ],
             outputs=[io.Video.Output(), io.String.Output(display_name="info")],
@@ -170,7 +171,7 @@ class MaybaumOpenRouterVideo(io.ComfyNode):
         return openrouter.check_options("videos", model, duration=duration, resolution=resolution, aspect_ratio=aspect_ratio)
 
     @classmethod
-    def execute(cls, kunde, prompt, model, duration, resolution, aspect_ratio, generate_audio, seed, first_frame=None, last_frame=None, reference_images=None):
+    def execute(cls, kunde, prompt, model, duration, resolution, aspect_ratio, generate_audio, seed, first_frame=None, last_frame=None, reference_video=None, reference_images=None):
         caps = openrouter.capabilities("videos", model)
         payload = {"model": model, "prompt": prompt}
         if duration != "auto":
@@ -188,15 +189,19 @@ class MaybaumOpenRouterVideo(io.ComfyNode):
                 frames.append({**image_urls([image[:1]])[0], "frame_type": frame_type})
         if frames:
             payload["frame_images"] = frames
-        if reference_images:
-            payload["input_references"] = image_urls(reference_images.values())
+        references = image_urls(reference_images.values()) if reference_images else []
+        if reference_video is not None:
+            video = video_to_base64_string(reference_video, Types.VideoContainer.MP4, Types.VideoCodec.H264)
+            references.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video}"}})
+        if references:
+            payload["input_references"] = references
 
         start = time.time()
         job = openrouter.request(kunde, "POST", "/videos", json=payload, timeout=120).json()
         job_id = job["id"]
         while job["status"] in ("pending", "in_progress"):
             if time.time() - start > VIDEO_TIMEOUT:
-                raise RuntimeError(f"Video-Job {job_id} nach {VIDEO_TIMEOUT // 60} min nicht fertig. Abgebrochen, der Job läuft bei OpenRouter evtl. weiter.")
+                raise RuntimeError(f"Video job {job_id} not finished after {VIDEO_TIMEOUT // 60} min. Stopped waiting, the job may still run and be billed at OpenRouter.")
             time.sleep(5)
             comfy.model_management.throw_exception_if_processing_interrupted()
             try:
@@ -204,7 +209,7 @@ class MaybaumOpenRouterVideo(io.ComfyNode):
             except (requests.ConnectionError, requests.Timeout):
                 continue
         if job["status"] != "completed":
-            raise RuntimeError(f"Video-Job {job_id} · Status {job['status']}: {job.get('error')}")
+            raise RuntimeError(f"Video job {job_id} · Status {job['status']}: {job.get('error')}")
 
         content = openrouter.request(kunde, "GET", f"/videos/{job_id}/content", params={"index": 0}).content
         return io.NodeOutput(InputImpl.VideoFromFile(BytesIO(content)), format_info(kunde, model, job.get("usage"), start))

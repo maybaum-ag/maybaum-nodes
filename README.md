@@ -14,17 +14,19 @@ Getestet mit ComfyUI v0.39.0. Zusätzliche Python-Pakete sind nicht nötig.
 
 - **OpenRouter API** · Wählt den Kunden-Key. Ausgang an Bild- und Video-Node anschliessen.
 - **OpenRouter Image** · Bildgenerierung. Referenzbilder: Neue Eingänge erscheinen automatisch, jeder nimmt auch einen ganzen Batch. Bei transparentem Hintergrund liegt die Transparenz am Ausgang `mask`.
-- **OpenRouter Video** · Videogenerierung, optional mit Start- und Endbild. Ausgang an «Save Video».
+- **OpenRouter Video** · Videogenerierung, optional mit Start- und Endbild und einem Referenzvideo. Das Referenzvideo verwenden nur Modelle, die Video-Referenzen kennen. Ausgang an «Save Video».
 
 Der Ausgang `info` zeigt Kunde, Modell, Dauer und Kosten.
+
+Oben rechts auf der Image- und Video-Node stehen die geschätzten Kosten pro Run. Die Schätzung rechnet mit Modell, Auflösung, Qualität, Batch, Dauer, Audio und angeschlossenen Bildern. Die Preise kommen von OpenRouter. Rechnet ein Modell nach Tokens ab, steht dort «Token pricing, cost known after run». Massgebend sind die effektiven Kosten am Ausgang `info`.
 
 Optionen wie Seitenverhältnis, Auflösung, Dauer, Batch, Seed, Audio oder Transparenz erscheinen nur, wenn das gewählte Modell sie unterstützt. Dropdowns zeigen nur die Werte des Modells. «auto» heisst: Standard des Modells. Modellliste und Optionen kommen von OpenRouter und werden alle 10 Minuten neu geladen.
 
 ## Keys
 
 1. Key des Kunden im Keeper kopieren.
-2. Auf der Node «OpenRouter API» «Keys verwalten» klicken, einen Alias eingeben (z. B. `kunde-a`) und den Key einfügen.
-3. «Prüfen und speichern». Ein ungültiger Key wird abgelehnt.
+2. Auf der Node «OpenRouter API» «Manage keys» klicken, einen Alias eingeben (z. B. `client-a`) und den Key einfügen.
+3. «Verify and save». Ein ungültiger Key wird abgelehnt.
 4. Kunden im Dropdown der Node «OpenRouter API» wählen.
 
 Keys bleiben nur im Arbeitsspeicher von ComfyUI. Nach jedem Neustart neu einfügen. Im Workflow und in den Bild-Metadaten steht nur der Alias.
