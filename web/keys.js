@@ -12,6 +12,19 @@ const STYLE = `
 .maybaum-keys .status { min-height: 1.2em; font-size: 12px; }
 `;
 
+async function refreshAliases() {
+    const res = await api.fetchApi("/maybaum/keys/aliases");
+    const aliases = await res.json();
+    for (const node of app.graph.nodes) {
+        if (node.comfyClass !== "MaybaumAPIKey") continue;
+        const widget = node.widgets?.find((w) => w.name === "alias");
+        if (!widget) continue;
+        widget.options.values = aliases;
+        if (!widget.value && aliases.length) widget.value = aliases[0];
+        node.setDirtyCanvas(true, true);
+    }
+}
+
 async function fetchKeys() {
     const res = await api.fetchApi("/maybaum/keys");
     return await res.json();
@@ -87,6 +100,7 @@ function openDialog(node) {
             remove.addEventListener("click", async () => {
                 const res = await api.fetchApi(`/maybaum/keys/${encodeURIComponent(alias)}`, { method: "DELETE" });
                 renderList(await res.json());
+                refreshAliases();
             });
             row.append(name, remove);
             list.appendChild(row);
@@ -114,6 +128,7 @@ function openDialog(node) {
         if (data.usage != null) parts.push(`Usage: $${data.usage}`);
         if (data.limit_remaining != null) parts.push(`Remaining: $${data.limit_remaining}`);
         status.textContent = parts.join(" · ");
+        await refreshAliases();
         const widget = node.widgets?.find((w) => w.name === "alias");
         if (widget) {
             widget.value = data.alias;
@@ -132,5 +147,6 @@ app.registerExtension({
         if (node.comfyClass !== "MaybaumAPIKey") return;
         const button = node.addWidget("button", "Manage keys", null, () => openDialog(node), { serialize: false });
         button.serialize = false;
+        refreshAliases();
     },
 });

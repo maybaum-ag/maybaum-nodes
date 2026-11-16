@@ -29,6 +29,11 @@ def get(alias, provider):
     return key
 
 
+def first(provider):
+    """Any loaded key of a provider. Only for lookups that bill nobody, like prices."""
+    return next((k[provider] for k in _keys.values() if provider in k), None)
+
+
 def _verify(provider, key):
     url, scheme = VERIFY[provider]
     return requests.get(url, headers={"Authorization": f"{scheme} {key}"}, timeout=15)

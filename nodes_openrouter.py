@@ -9,9 +9,8 @@ import comfy.model_management
 from comfy_api.latest import InputImpl, Types, io
 from comfy_api_nodes.util.conversions import bytesio_to_image_tensor, tensor_to_data_uri, video_to_base64_string
 
-from . import keys, openrouter
-
-Client = io.Custom("MAYBAUM_CLIENT")
+from . import openrouter
+from .nodes_keys import Client
 
 # All values OpenRouter knows. web/openrouter_options.js shows only the ones the model allows,
 # validate_inputs checks against the model list. "auto" means: not sent, model default.
@@ -19,15 +18,6 @@ IMAGE_ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"
 VIDEO_ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21"]
 VIDEO_DURATIONS = ["auto"] + [str(s) for s in range(1, 61)]
 VIDEO_TIMEOUT = 30 * 60
-
-
-def model_input(kind):
-    return io.Combo.Input(
-        "model",
-        options=[],
-        remote=io.RemoteOptions(route=f"/maybaum/openrouter/models/{kind}", refresh_button=True),
-        tooltip="Live list from OpenRouter.",
-    )
 
 
 def reference_input():
@@ -49,34 +39,6 @@ def format_info(client, model, usage, start):
     return " · ".join(parts)
 
 
-class MaybaumAPIKey(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="MaybaumAPIKey",
-            display_name="API Key",
-            category="Maybaum",
-            description="Selects a client. One alias holds an OpenRouter key, a fal key or both. Keys live only in RAM and are lost on restart.",
-            inputs=[
-                io.Combo.Input(
-                    "alias",
-                    options=[],
-                    remote=io.RemoteOptions(route="/maybaum/keys/aliases", refresh_button=True, refresh=1000),
-                    tooltip="Client alias. Add keys via «Manage keys».",
-                ),
-            ],
-            outputs=[Client.Output(display_name="client")],
-        )
-
-    @classmethod
-    def validate_inputs(cls, alias):
-        return keys.check_alias(alias)
-
-    @classmethod
-    def execute(cls, alias):
-        return io.NodeOutput(alias)
-
-
 class MaybaumOpenRouterImage(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -88,7 +50,7 @@ class MaybaumOpenRouterImage(io.ComfyNode):
             inputs=[
                 Client.Input("client"),
                 io.String.Input("prompt", multiline=True),
-                model_input("images"),
+                io.Combo.Input("model", options=[], tooltip="Live list from OpenRouter."),
                 io.Combo.Input("aspect_ratio", options=IMAGE_ASPECT_RATIOS),
                 io.Combo.Input("resolution", options=["auto", "512", "768", "1K", "1.5K", "2K", "4K"]),
                 io.Combo.Input("quality", options=["auto", "low", "medium", "high", "xhigh", "max"]),
@@ -152,7 +114,7 @@ class MaybaumOpenRouterVideo(io.ComfyNode):
             inputs=[
                 Client.Input("client"),
                 io.String.Input("prompt", multiline=True),
-                model_input("videos"),
+                io.Combo.Input("model", options=[], tooltip="Live list from OpenRouter."),
                 io.Combo.Input("duration", options=VIDEO_DURATIONS, tooltip="Seconds."),
                 io.Combo.Input("resolution", options=["auto", "480p", "720p", "768p", "1080p", "2K", "4K"]),
                 io.Combo.Input("aspect_ratio", options=VIDEO_ASPECT_RATIOS),

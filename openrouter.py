@@ -216,15 +216,6 @@ def estimate(kind, model, values):
 routes = PromptServer.instance.routes
 
 
-@routes.get("/maybaum/openrouter/models/{kind}")
-async def list_models(request):
-    kind = request.match_info["kind"]
-    if kind not in ("images", "videos"):
-        raise web.HTTPNotFound()
-    models = await asyncio.to_thread(_load_models, kind)
-    return web.json_response(sorted(models))
-
-
 @routes.get("/maybaum/openrouter/capabilities/{kind}")
 async def list_capabilities(request):
     kind = request.match_info["kind"]

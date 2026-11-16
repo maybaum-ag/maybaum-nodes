@@ -52,8 +52,7 @@ function setHidden(node, widget, hidden) {
     if (!!widget.hidden === hidden) return;
     widget.hidden = hidden;
     if (widget.options) widget.options.hidden = hidden;
-    // Not node.computeSize(): it reads the remote combo's options and resets the model
-    // to the first entry on first load.
+    // Only add or remove this widget's height, keep the size the user gave the node.
     const height = (widget.computeSize?.(node.size[0])?.[1] ?? LiteGraph.NODE_WIDGET_HEIGHT) + 4;
     node.setSize([node.size[0], node.size[1] + (hidden ? -height : height)]);
 }
@@ -85,6 +84,8 @@ async function syncOptions(node, config) {
     const all = await fetchCapabilities(config.kind);
     // List not loadable: keep everything visible, the backend checks on execution.
     if (!all) return;
+    model.options.values = Object.keys(all).sort();
+    if (!(model.value in all)) model.value = model.options.values[0];
     const caps = all[model.value] ?? {};
     for (const [name, type] of Object.entries(config.widgets)) {
         const widget = node.widgets.find((w) => w.name === name);
@@ -112,7 +113,6 @@ app.registerExtension({
         if (!config) return;
         const model = node.widgets?.find((w) => w.name === "model");
         if (!model) return;
-        // The remote combo also calls callback after the list first loads.
         const callback = model.callback;
         model.callback = function (...args) {
             const result = callback?.apply(this, args);
