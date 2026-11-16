@@ -6,30 +6,22 @@ import requests
 from aiohttp import web
 from server import PromptServer
 
+from . import keys
+
 API_URL = "https://openrouter.ai/api/v1"
 HEADERS = {"HTTP-Referer": "https://maybaum.ch", "X-Title": "Maybaum Custom Nodes"}
 
-# Keys leben nur im RAM dieses Prozesses. Nie speichern, nie loggen, nie ausgeben.
-_keys = {}
-# kind ("images" | "videos") -> (Ladezeit, {model_id: Modelleintrag aus /{kind}/models})
+# kind ("images" | "videos") -> (load time, {model_id: model entry from /{kind}/models})
 _models = {}
 MODELS_TTL = 10 * 60
-# model_id -> (Ladezeit, Endpoints mit Preisen) für Bildmodelle. Videopreise stehen direkt in der Modellliste.
+# model_id -> (load time, endpoints with prices) for image models. Video prices are in the model list itself.
 _endpoints = {}
-# Ausgabeformate, die als IMAGE dekodiert werden können. SVG nicht.
+# Output formats that decode to IMAGE. Not SVG.
 RASTER_FORMATS = ("png", "jpeg", "webp")
 
 
-def check_alias(alias):
-    if alias in _keys:
-        return True
-    return f"Key for client '{alias}' not loaded. Add it on the «OpenRouter API» node via «Manage keys»."
-
-
 def request(alias, method, path, timeout=600, **kwargs):
-    if alias not in _keys:
-        raise ValueError(check_alias(alias))
-    res = requests.request(method, API_URL + path, headers={**HEADERS, "Authorization": f"Bearer {_keys[alias]}"}, timeout=timeout, **kwargs)
+    res = requests.request(method, API_URL + path, headers={**HEADERS, "Authorization": f"Bearer {keys.get(alias, 'openrouter')}"}, timeout=timeout, **kwargs)
     if not res.ok:
         raise RuntimeError(f"OpenRouter {method} {path} · Status {res.status_code}: {res.text[:500]}")
     return res
@@ -43,7 +35,7 @@ def _load_models(kind):
         res = requests.get(f"{API_URL}/{kind}/models", headers=HEADERS, timeout=15)
         res.raise_for_status()
     except requests.RequestException:
-        # Alte Liste weiterverwenden, solange OpenRouter nicht erreichbar ist.
+        # Keep using the old list while OpenRouter is unreachable.
         if models is not None:
             return models
         raise
@@ -56,8 +48,8 @@ def image_params(model):
 
 
 def transparent_format(model):
-    """None, wenn das Modell keinen transparenten Hintergrund kann. Sonst das Ausgabeformat
-    mit Alpha, das mitgeschickt werden muss, oder "" wenn das Modell output_format nicht kennt."""
+    """None if the model cannot do a transparent background. Otherwise the alpha-capable output
+    format that must be sent along, or "" if the model has no output_format."""
     params = image_params(model)
     if "transparent" not in (params.get("background") or {}).get("values", []):
         return None
@@ -68,14 +60,14 @@ def transparent_format(model):
 
 
 def _choices(values, allowed=None):
-    """Wählbare Werte ohne "auto". None, wenn es nichts zu wählen gibt."""
+    """Selectable values without "auto". None if there is nothing to choose."""
     values = [str(v) for v in values or [] if v != "auto" and (allowed is None or v in allowed)]
     return values if len(values) > 1 else None
 
 
 def capabilities(kind, model):
-    """Was sich beim Modell einstellen lässt, nach Widget-Name.
-    Liste = Dropdown-Werte, Zahl = Maximum, True = Schalter."""
+    """What the model lets you set, by widget name.
+    list = dropdown values, number = maximum, True = toggle."""
     caps = {}
     if kind == "images":
         params = image_params(model)
@@ -103,7 +95,7 @@ def capabilities(kind, model):
 
 
 def check_options(kind, model, **values):
-    """Prüft Widget-Werte gegen das Modell. Neutral sind "auto", batch 1 und False."""
+    """Checks widget values against the model. "auto", batch 1 and False are neutral."""
     try:
         models = _load_models(kind)
     except requests.RequestException as e:
@@ -135,7 +127,7 @@ def _load_endpoints(model):
 
 
 def _prefer(items, *keeps):
-    """Schränkt nacheinander ein. Ein Filter ohne Treffer wird übersprungen."""
+    """Narrows down filter by filter. A filter without matches is skipped."""
     for keep in keeps:
         items = [i for i in items if keep(i)] or items
     return items
@@ -157,7 +149,7 @@ def _image_estimate(model, resolution, quality, batch, references):
     for endpoint in _load_endpoints(model):
         pricing = endpoint.get("pricing") or []
         outputs = [p for p in pricing if p["billable"] == "output_image" and p["unit"] == "image"]
-        # variant: None = Grundpreis, "2k" oder "low_2k" = Auflösung (mit Qualität). Zuschläge wie "moodboards" ignorieren.
+        # variant: None = base price, "2k" or "low_2k" = resolution (with quality). Ignore surcharges like "moodboards".
         sized = [p for p in outputs if p.get("variant") and re.fullmatch(r"(\w+_)?(768|[\d.]+k)", p["variant"])]
         base = [p for p in outputs if not p.get("variant")]
         if quality != "auto":
@@ -215,39 +207,13 @@ def _video_estimate(model, duration, resolution, generate_audio, frames, referen
 
 
 def estimate(kind, model, values):
-    """Kostenschätzung pro Run als Text, leer wenn OpenRouter keine Preise liefert."""
+    """Cost estimate per run as text, empty if OpenRouter has no prices."""
     if kind == "images":
         return _image_estimate(model, values["resolution"], values["quality"], int(values["batch"]), int(values["references"]))
     return _video_estimate(model, values["duration"], values["resolution"], values["generate_audio"], int(values["frames"]), int(values["references"]))
 
 
 routes = PromptServer.instance.routes
-
-
-@routes.get("/maybaum/openrouter/aliases")
-async def list_aliases(request):
-    return web.json_response(sorted(_keys))
-
-
-@routes.post("/maybaum/openrouter/keys")
-async def add_key(request):
-    data = await request.json()
-    alias = str(data.get("alias", "")).strip()
-    key = str(data.get("key", "")).strip()
-    if not alias or not key:
-        return web.json_response({"error": "Enter alias and key."}, status=400)
-    res = await asyncio.to_thread(requests.get, f"{API_URL}/key", headers={**HEADERS, "Authorization": f"Bearer {key}"}, timeout=15)
-    if not res.ok:
-        return web.json_response({"error": f"OpenRouter rejected the key (status {res.status_code})."}, status=400)
-    _keys[alias] = key
-    info = res.json().get("data", {})
-    return web.json_response({"alias": alias, "label": info.get("label"), "limit": info.get("limit"), "limit_remaining": info.get("limit_remaining"), "usage": info.get("usage")})
-
-
-@routes.delete("/maybaum/openrouter/keys/{alias}")
-async def delete_key(request):
-    _keys.pop(request.match_info["alias"], None)
-    return web.json_response(sorted(_keys))
 
 
 @routes.get("/maybaum/openrouter/models/{kind}")

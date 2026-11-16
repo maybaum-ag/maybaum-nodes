@@ -1,6 +1,6 @@
 # Maybaum Custom Nodes
 
-Bild- und Videogenerierung über OpenRouter mit einem Key pro Kunde.
+Bild- und Videogenerierung über OpenRouter mit Keys pro Kunde. Ein Kunde kann zusätzlich einen fal-Key haben.
 
 ## Installation
 
@@ -12,7 +12,7 @@ Getestet mit ComfyUI v0.39.0. Zusätzliche Python-Pakete sind nicht nötig.
 
 ## Nodes
 
-- **OpenRouter API** · Wählt den Kunden-Key. Ausgang an Bild- und Video-Node anschliessen.
+- **API Key** · Wählt den Kunden. Ausgang an Bild- und Video-Node anschliessen.
 - **OpenRouter Image** · Bildgenerierung. Referenzbilder: Neue Eingänge erscheinen automatisch, jeder nimmt auch einen ganzen Batch. Bei transparentem Hintergrund liegt die Transparenz am Ausgang `mask`.
 - **OpenRouter Video** · Videogenerierung, optional mit Start- und Endbild und einem Referenzvideo. Das Referenzvideo verwenden nur Modelle, die Video-Referenzen kennen. Ausgang an «Save Video».
 
@@ -24,10 +24,14 @@ Optionen wie Seitenverhältnis, Auflösung, Dauer, Batch, Seed, Audio oder Trans
 
 ## Keys
 
-1. Key des Kunden im Keeper kopieren.
-2. Auf der Node «OpenRouter API» «Manage keys» klicken, einen Alias eingeben (z. B. `client-a`) und den Key einfügen.
-3. «Verify and save». Ein ungültiger Key wird abgelehnt.
-4. Kunden im Dropdown der Node «OpenRouter API» wählen.
+1. Keys des Kunden im Keeper kopieren.
+2. Auf der Node «API Key» «Manage keys» klicken, einen Alias eingeben (z. B. `client-a`) und den OpenRouter-Key, den fal-Key oder beide einfügen.
+3. «Verify and save». Jeder Key wird beim Anbieter geprüft. Ist einer ungültig, wird nichts gespeichert.
+4. Kunden im Dropdown der Node «API Key» wählen.
+
+Zweiten Key später ergänzen: In der Liste auf den Alias klicken, nur das fehlende Feld ausfüllen, speichern. Ein leeres Feld lässt den geladenen Key unverändert.
+
+Fehlt für den Kunden der Key des Anbieters, den eine Node braucht, bricht der Run mit einer Meldung ab.
 
 Keys bleiben nur im Arbeitsspeicher von ComfyUI. Nach jedem Neustart neu einfügen. Im Workflow und in den Bild-Metadaten steht nur der Alias.
 

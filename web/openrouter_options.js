@@ -1,9 +1,9 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-// Widgets, die vom Modell abhängen. Was das Modell nicht kann, wird ausgeblendet und neutral gesetzt.
-// combo: Werte vom Modell, neutral "auto" · max: Obergrenze vom Modell, neutral 1
-// toggle: neutral false · keep: Wert bleibt, das Backend schickt ihn nur bei Unterstützung mit
+// Widgets that depend on the model. What the model cannot do is hidden and set to neutral.
+// combo: values from the model, neutral "auto" · max: upper limit from the model, neutral 1
+// toggle: neutral false · keep: value stays, the backend only sends it if supported
 const NODES = {
     MaybaumOpenRouterImage: {
         kind: "images",
@@ -52,8 +52,8 @@ function setHidden(node, widget, hidden) {
     if (!!widget.hidden === hidden) return;
     widget.hidden = hidden;
     if (widget.options) widget.options.hidden = hidden;
-    // Nicht node.computeSize(): Das liest die Optionen des Remote-Combos und setzt das Modell
-    // beim ersten Laden auf den ersten Eintrag zurück.
+    // Not node.computeSize(): it reads the remote combo's options and resets the model
+    // to the first entry on first load.
     const height = (widget.computeSize?.(node.size[0])?.[1] ?? LiteGraph.NODE_WIDGET_HEIGHT) + 4;
     node.setSize([node.size[0], node.size[1] + (hidden ? -height : height)]);
 }
@@ -73,7 +73,7 @@ async function updateCost(node, config) {
     const request = JSON.stringify({ model, values });
     node.maybaumCostRequest = request;
     const res = await api.fetchApi(`/maybaum/openrouter/estimate/${config.kind}`, { method: "POST", body: request });
-    // Nur die letzte Anfrage zählt, ältere Antworten können später eintreffen.
+    // Only the latest request counts, older responses may arrive later.
     if (node.maybaumCostRequest !== request) return;
     node.maybaumCost = res.ok ? (await res.json()).text : "";
     node.setDirtyCanvas(true, true);
@@ -83,7 +83,7 @@ async function syncOptions(node, config) {
     const model = node.widgets?.find((w) => w.name === "model");
     if (!model) return;
     const all = await fetchCapabilities(config.kind);
-    // Liste nicht ladbar: alles sichtbar lassen, das Backend prüft beim Ausführen.
+    // List not loadable: keep everything visible, the backend checks on execution.
     if (!all) return;
     const caps = all[model.value] ?? {};
     for (const [name, type] of Object.entries(config.widgets)) {
@@ -112,7 +112,7 @@ app.registerExtension({
         if (!config) return;
         const model = node.widgets?.find((w) => w.name === "model");
         if (!model) return;
-        // Der Remote-Combo ruft callback auch nach dem ersten Laden der Liste auf.
+        // The remote combo also calls callback after the list first loads.
         const callback = model.callback;
         model.callback = function (...args) {
             const result = callback?.apply(this, args);
