@@ -19,13 +19,13 @@ _keys = {}
 def check_alias(alias):
     if alias in _keys:
         return True
-    return f"No keys for client '{alias}'. Add them on the «API Key» node via «Manage keys»."
+    return f"No keys loaded for alias '{alias}'. Add them on the «API Key» node via «Manage keys»."
 
 
 def get(alias, provider):
     key = _keys.get(alias, {}).get(provider)
     if key is None:
-        raise ValueError(f"No {PROVIDERS[provider]} key for client '{alias}'. Add it on the «API Key» node via «Manage keys».")
+        raise ValueError(f"No {PROVIDERS[provider]} key loaded for alias '{alias}'. Add it on the «API Key» node via «Manage keys».")
     return key
 
 

@@ -33,7 +33,7 @@ def image_urls(images):
 
 
 def format_info(api_key, model, usage, start):
-    parts = [f"Client: {api_key}", f"Model: {model}", f"Time: {time.time() - start:.1f} s"]
+    parts = [f"Alias: {api_key}", f"Model: {model}", f"Time: {time.time() - start:.1f} s"]
     if usage and usage.get("cost") is not None:
         parts.append(f"Cost: ${float(usage['cost']):.4f}")
     return " · ".join(parts)

@@ -63,7 +63,7 @@ def first_url(result, kind):
 
 
 def format_info(api_key, model, start):
-    parts = [f"Client: {api_key}", f"Model: {model}", f"Time: {time.time() - start:.1f} s"]
+    parts = [f"Alias: {api_key}", f"Model: {model}", f"Time: {time.time() - start:.1f} s"]
     if price := fal.price(model):
         parts.append(f"Price: {price}")
     return " · ".join(parts)

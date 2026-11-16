@@ -43,11 +43,11 @@ function openDialog(node) {
     overlay.innerHTML = `
         <div class="maybaum-keys">
             <h3>API keys</h3>
-            <p>One alias per client, with an OpenRouter key, a fal key or both. Keys stay in ComfyUI's memory only. Add them again after a restart.</p>
+            <p>An alias is a name of your choice, for example per project or account. It holds an OpenRouter key, a fal key or both. Keys stay in ComfyUI's memory only. Add them again after a restart.</p>
             <div class="list"></div>
-            <input class="alias" placeholder="Alias, e.g. client-a" autocomplete="off">
-            <input class="key" name="openrouter" type="password" placeholder="OpenRouter key from Keeper" autocomplete="off">
-            <input class="key" name="fal" type="password" placeholder="fal key from Keeper" autocomplete="off">
+            <input class="alias" placeholder="Alias, e.g. project-a" autocomplete="off">
+            <input class="key" name="openrouter" type="password" placeholder="OpenRouter API key" autocomplete="off">
+            <input class="key" name="fal" type="password" placeholder="fal API key" autocomplete="off">
             <p>Leave a field empty to keep the key already loaded for this alias.</p>
             <div class="row">
                 <button class="save">Verify and save</button>

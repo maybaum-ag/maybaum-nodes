@@ -12,9 +12,9 @@ class MaybaumAPIKey(io.ComfyNode):
             node_id="MaybaumAPIKey",
             display_name="API Key",
             category="Maybaum",
-            description="Selects a api_key. One alias holds an OpenRouter key, a fal key or both. Keys live only in RAM and are lost on restart.",
+            description="Selects a key alias for the other Maybaum nodes. An alias holds an OpenRouter key, a fal key or both. Keys live only in memory and are lost on restart.",
             inputs=[
-                io.Combo.Input("alias", options=[], tooltip="Client alias. Add keys via «Manage keys»."),
+                io.Combo.Input("alias", options=[], tooltip="Key alias. Add keys via «Manage keys»."),
             ],
             outputs=[APIKey.Output(display_name="API Key")],
         )
