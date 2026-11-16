@@ -8,7 +8,7 @@ from comfy_api.latest import InputImpl, Types, io
 from comfy_api_nodes.util.conversions import bytesio_to_image_tensor, tensor_to_bytesio
 
 from . import fal
-from .nodes_keys import Client
+from .nodes_keys import APIKey
 
 # web/fal_options.js fills model, variant and target_resolution from fal and shows only the widgets the model uses.
 WIDGETS = {
@@ -62,26 +62,26 @@ def first_url(result, kind):
     return result[kind + "s"][0]["url"]
 
 
-def format_info(client, model, start):
-    parts = [f"Client: {client}", f"Model: {model}", f"Time: {time.time() - start:.1f} s"]
+def format_info(api_key, model, start):
+    parts = [f"Client: {api_key}", f"Model: {model}", f"Time: {time.time() - start:.1f} s"]
     if price := fal.price(model):
         parts.append(f"Price: {price}")
     return " · ".join(parts)
 
 
-def upload_video(client, video):
+def upload_video(api_key, video):
     buffer = BytesIO()
     # Keeps the original streams if they fit into MP4, otherwise transcodes.
     video.save_to(buffer, format=Types.VideoContainer.MP4)
-    return fal.upload(client, buffer.getvalue(), "video/mp4", "input.mp4")
+    return fal.upload(api_key, buffer.getvalue(), "video/mp4", "input.mp4")
 
 
-def run_video(client, model, values, video):
+def run_video(api_key, model, values, video):
     start = time.time()
-    payload = {"video_url": upload_video(client, video), **model_payload(model, values)}
-    result = fal.run(client, model, payload)
+    payload = {"video_url": upload_video(api_key, video), **model_payload(model, values)}
+    result = fal.run(api_key, model, payload)
     content = fal.download(first_url(result, "video"))
-    return io.NodeOutput(InputImpl.VideoFromFile(BytesIO(content)), format_info(client, model, start))
+    return io.NodeOutput(InputImpl.VideoFromFile(BytesIO(content)), format_info(api_key, model, start))
 
 
 def video_schema(node_id, display_name, description, widgets):
@@ -91,7 +91,7 @@ def video_schema(node_id, display_name, description, widgets):
         category="Maybaum",
         description=description,
         inputs=[
-            Client.Input("client"),
+            APIKey.Input("api_key", display_name="API Key"),
             io.Video.Input("video"),
             io.Combo.Input("model", options=[], tooltip="Live list from fal."),
             *(WIDGETS[w]() for w in widgets),
@@ -109,7 +109,7 @@ class MaybaumFalImageUpscale(io.ComfyNode):
             category="Maybaum",
             description="Image upscaling via fal. Every image of a batch is upscaled on its own. Options appear only if the model supports them.",
             inputs=[
-                Client.Input("client"),
+                APIKey.Input("api_key", display_name="API Key"),
                 io.Image.Input("image"),
                 io.Combo.Input("model", options=[], tooltip="Live list from fal."),
                 *(WIDGETS[w]() for w in ("upscale_factor", "variant", "target_resolution", "creativity", "prompt")),
@@ -122,18 +122,18 @@ class MaybaumFalImageUpscale(io.ComfyNode):
         return check_values(model, {"variant": variant, "target_resolution": target_resolution})
 
     @classmethod
-    def execute(cls, client, image, model, **values):
+    def execute(cls, api_key, image, model, **values):
         start = time.time()
         params = model_payload(model, values)
         images, masks = [], []
         for single in image:
-            url = fal.upload(client, tensor_to_bytesio(single, total_pixels=None).getvalue(), "image/png", "input.png")
-            result = fal.run(client, model, {"image_url": url, **params})
+            url = fal.upload(api_key, tensor_to_bytesio(single, total_pixels=None).getvalue(), "image/png", "input.png")
+            result = fal.run(api_key, model, {"image_url": url, **params})
             upscaled = bytesio_to_image_tensor(BytesIO(fal.download(first_url(result, "image"))))
             # Mask as in LoadImage: 1 = transparent. Empty without alpha channel.
             masks.append(1.0 - upscaled[..., 3] if upscaled.shape[-1] == 4 else torch.zeros(upscaled.shape[:3]))
             images.append(upscaled[..., :3])
-        return io.NodeOutput(torch.cat(images), format_info(client, model, start), torch.cat(masks))
+        return io.NodeOutput(torch.cat(images), format_info(api_key, model, start), torch.cat(masks))
 
 
 class MaybaumFalVideoUpscale(io.ComfyNode):
@@ -150,8 +150,8 @@ class MaybaumFalVideoUpscale(io.ComfyNode):
         return check_values(model, {"variant": variant, "target_resolution": target_resolution})
 
     @classmethod
-    def execute(cls, client, video, model, **values):
-        return run_video(client, model, values, video)
+    def execute(cls, api_key, video, model, **values):
+        return run_video(api_key, model, values, video)
 
 
 class MaybaumFalVideoInterpolate(io.ComfyNode):
@@ -168,5 +168,5 @@ class MaybaumFalVideoInterpolate(io.ComfyNode):
         return check_values(model, {"variant": variant})
 
     @classmethod
-    def execute(cls, client, video, model, **values):
-        return run_video(client, model, values, video)
+    def execute(cls, api_key, video, model, **values):
+        return run_video(api_key, model, values, video)

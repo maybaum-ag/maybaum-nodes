@@ -2,7 +2,7 @@ from comfy_api.latest import io
 
 from . import keys
 
-Client = io.Custom("MAYBAUM_CLIENT")
+APIKey = io.Custom("MAYBAUM_API_KEY")
 
 
 class MaybaumAPIKey(io.ComfyNode):
@@ -12,11 +12,11 @@ class MaybaumAPIKey(io.ComfyNode):
             node_id="MaybaumAPIKey",
             display_name="API Key",
             category="Maybaum",
-            description="Selects a client. One alias holds an OpenRouter key, a fal key or both. Keys live only in RAM and are lost on restart.",
+            description="Selects a api_key. One alias holds an OpenRouter key, a fal key or both. Keys live only in RAM and are lost on restart.",
             inputs=[
                 io.Combo.Input("alias", options=[], tooltip="Client alias. Add keys via «Manage keys»."),
             ],
-            outputs=[Client.Output(display_name="client")],
+            outputs=[APIKey.Output(display_name="API Key")],
         )
 
     @classmethod
