@@ -19,11 +19,13 @@ MODELS_TTL = 10 * 60
 JOB_TIMEOUT = 30 * 60
 
 UPSCALE_WORDS = ("upscal", "increase-resolution", "-sr", "esrgan", "vsr")
-# Live search on fal per node. keep() drops search hits that are not this task.
+INPAINT_WORDS = ("inpaint", "fill", "eraser", "object-removal")
+# Live search on fal per node, one request per search word. keep() drops search hits that are not this task.
 TASKS = {
-    "image_upscale": {"q": "upscale", "category": "image-to-image", "keep": lambda eid, meta: any(w in f"{eid} {meta['display_name']}".lower() for w in UPSCALE_WORDS)},
-    "video_upscale": {"q": "upscale", "category": "video-to-video", "keep": lambda eid, meta: any(w in f"{eid} {meta['display_name']}".lower() for w in UPSCALE_WORDS)},
-    "video_interpolate": {"q": "interpolat", "category": "video-to-video", "keep": lambda eid, meta: True},
+    "image_upscale": {"q": ("upscale",), "category": "image-to-image", "keep": lambda eid, meta: any(w in f"{eid} {meta['display_name']}".lower() for w in UPSCALE_WORDS)},
+    "video_upscale": {"q": ("upscale",), "category": "video-to-video", "keep": lambda eid, meta: any(w in f"{eid} {meta['display_name']}".lower() for w in UPSCALE_WORDS)},
+    "video_interpolate": {"q": ("interpolat",), "category": "video-to-video", "keep": lambda eid, meta: True},
+    "image_inpaint": {"q": ("inpaint", "fill", "eraser"), "category": "image-to-image", "keep": lambda eid, meta: any(w in eid.lower() for w in INPAINT_WORDS)},
 }
 # Node widget -> model parameters it fills, first match wins.
 PARAMS = {
@@ -31,7 +33,10 @@ PARAMS = {
     "variant": ("model",),
     "target_resolution": ("target_resolution", "resolution"),
     "creativity": ("creativity",),
-    "prompt": ("prompt",),
+    "prompt": ("prompt", "instruction"),
+    "negative_prompt": ("negative_prompt",),
+    "strength": ("strength",),
+    "seed": ("seed",),
     "target_fps": ("target_fps",),
     "frames_between": ("num_frames",),
     "slowdown_factor": ("slowdown_factor",),
@@ -57,16 +62,18 @@ def _load_models(task):
     if models is not None and time.time() - loaded < MODELS_TTL:
         return models
     search = TASKS[task]
-    found, cursor = {}, None
+    found = {}
     try:
-        while True:
-            data = _get({"q": search["q"], "category": search["category"], "status": "active", "limit": 50, **({"cursor": cursor} if cursor else {})})
-            for m in data["models"]:
-                if search["keep"](m["endpoint_id"], m["metadata"]):
-                    found[m["endpoint_id"]] = m["metadata"]
-            cursor = data.get("next_cursor")
-            if not data.get("has_more"):
-                break
+        for q in search["q"]:
+            cursor = None
+            while True:
+                data = _get({"q": q, "category": search["category"], "status": "active", "limit": 50, **({"cursor": cursor} if cursor else {})})
+                for m in data["models"]:
+                    if search["keep"](m["endpoint_id"], m["metadata"]):
+                        found[m["endpoint_id"]] = m["metadata"]
+                cursor = data.get("next_cursor")
+                if not data.get("has_more"):
+                    break
     except requests.RequestException:
         # Keep using the old list while fal is unreachable or rate limited.
         if models is not None:
@@ -95,6 +102,12 @@ def _schema(endpoint_id):
                 option.update(components[option["$ref"].split("/")[-1]])
     _schemas[endpoint_id] = (time.time(), schema)
     return schema
+
+
+def inputs(endpoint_id):
+    """All input names of the model and the required ones."""
+    schema = _schema(endpoint_id)
+    return set(schema.get("properties", {})), set(schema.get("required", []))
 
 
 def params(endpoint_id):

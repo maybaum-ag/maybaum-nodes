@@ -4,6 +4,7 @@ from io import BytesIO
 import requests
 import torch
 
+import comfy.utils
 from comfy_api.latest import InputImpl, Types, io
 from comfy_api_nodes.util.conversions import bytesio_to_image_tensor, tensor_to_bytesio
 
@@ -17,6 +18,9 @@ WIDGETS = {
     "target_resolution": lambda: io.Combo.Input("target_resolution", options=["auto"]),
     "creativity": lambda: io.Float.Input("creativity", default=0.5, min=0.0, max=10.0, step=0.05, tooltip="How much detail the model may invent. Range depends on the model."),
     "prompt": lambda: io.String.Input("prompt", multiline=True, default="", tooltip="Optional guidance for models that accept a prompt."),
+    "negative_prompt": lambda: io.String.Input("negative_prompt", multiline=True, default="", tooltip="What the model should avoid."),
+    "strength": lambda: io.Float.Input("strength", default=0.85, min=0.0, max=1.0, step=0.01, tooltip="How much the masked area may change. Range depends on the model."),
+    "seed": lambda: io.Int.Input("seed", default=0, min=0, max=2147483647, control_after_generate=True),
     "target_fps": lambda: io.Int.Input("target_fps", default=0, min=0, max=120, tooltip="0 = model default, usually the source frame rate."),
     "frames_between": lambda: io.Int.Input("frames_between", default=1, min=1, max=8, tooltip="Frames generated between each pair of input frames."),
     "slowdown_factor": lambda: io.Int.Input("slowdown_factor", default=1, min=1, max=8, tooltip="1 keeps the speed, 2 doubles the duration (slow motion)."),
@@ -100,6 +104,16 @@ def video_schema(node_id, display_name, description, widgets):
     )
 
 
+def resize_to(image, height, width):
+    if image.shape[1:3] == (height, width):
+        return image
+    return comfy.utils.common_upscale(image.movedim(-1, 1), width, height, "bilinear", "disabled").movedim(1, -1)
+
+
+def upload_image(api_key, image):
+    return fal.upload(api_key, tensor_to_bytesio(image, total_pixels=None).getvalue(), "image/png", "input.png")
+
+
 class MaybaumFalImageUpscale(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -127,13 +141,70 @@ class MaybaumFalImageUpscale(io.ComfyNode):
         params = model_payload(model, values)
         images, masks = [], []
         for single in image:
-            url = fal.upload(api_key, tensor_to_bytesio(single, total_pixels=None).getvalue(), "image/png", "input.png")
-            result = fal.run(api_key, model, {"image_url": url, **params})
+            result = fal.run(api_key, model, {"image_url": upload_image(api_key, single), **params})
             upscaled = bytesio_to_image_tensor(BytesIO(fal.download(first_url(result, "image"))))
             # Mask as in LoadImage: 1 = transparent. Empty without alpha channel.
             masks.append(1.0 - upscaled[..., 3] if upscaled.shape[-1] == 4 else torch.zeros(upscaled.shape[:3]))
             images.append(upscaled[..., :3])
         return io.NodeOutput(torch.cat(images), format_info(api_key, model, start), torch.cat(masks))
+
+
+INPAINT_WIDGETS = ("prompt", "negative_prompt", "strength", "seed")
+
+
+class MaybaumFalImageInpaint(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MaybaumFalImageInpaint",
+            display_name="fal Image Inpaint",
+            category="Maybaum",
+            description="Inpainting via fal: the model repaints the masked area. Every image of a batch runs on its own. Options appear only if the model supports them.",
+            inputs=[
+                APIKey.Input("api_key", display_name="API Key"),
+                io.Image.Input("image"),
+                io.Mask.Input("mask", tooltip="White (1) = repaint. Paint it in the mask editor of «Load Image»."),
+                io.Combo.Input("model", options=[], tooltip="Live list from fal."),
+                *(WIDGETS[w]() for w in INPAINT_WIDGETS),
+                io.Boolean.Input("keep_unmasked", default=True, tooltip="Paste the result into the original only where the mask is, so everything else stays pixel-exact."),
+                io.Image.Input("reference_image", optional=True, tooltip="Reference image. Only models with a reference input use it, for example Flux Kontext Inpaint."),
+            ],
+            outputs=[io.Image.Output(), io.String.Output(display_name="info")],
+        )
+
+    @classmethod
+    def validate_inputs(cls, model):
+        checked = check_values(model, {})
+        if checked is not True:
+            return checked
+        names, required = fal.inputs(model)
+        if not names & {"mask_url", "mask_image_url"}:
+            return f"Model '{model}' takes no mask."
+        params = fal.params(model)
+        provided = {"image_url", "mask_url", "mask_image_url", "reference_image_url"} | {params[w]["name"] for w in INPAINT_WIDGETS if w in params}
+        if missing := required - provided:
+            return f"Model '{model}' needs {', '.join(sorted(missing))}, which this node does not provide."
+        return True
+
+    @classmethod
+    def execute(cls, api_key, image, mask, model, keep_unmasked, reference_image=None, **values):
+        start = time.time()
+        names, _ = fal.inputs(model)
+        mask_name = next(n for n in ("mask_url", "mask_image_url") if n in names)
+        params = model_payload(model, values)
+        if reference_image is not None and "reference_image_url" in names:
+            params["reference_image_url"] = upload_image(api_key, reference_image[0])
+        height, width = image.shape[1:3]
+        mask = resize_to(mask.unsqueeze(-1), height, width)
+        images = []
+        for i, single in enumerate(image):
+            single_mask = mask[min(i, len(mask) - 1)]
+            payload = {"image_url": upload_image(api_key, single), mask_name: upload_image(api_key, single_mask.expand(-1, -1, 3)), **params}
+            result = fal.run(api_key, model, payload)
+            # Some models return another size. Back to the input size, so the mask fits and the batch stays one size.
+            painted = resize_to(bytesio_to_image_tensor(BytesIO(fal.download(first_url(result, "image"))), mode="RGB"), height, width)[0]
+            images.append(torch.lerp(single, painted, single_mask) if keep_unmasked else painted)
+        return io.NodeOutput(torch.stack(images), format_info(api_key, model, start))
 
 
 class MaybaumFalVideoUpscale(io.ComfyNode):

@@ -28,6 +28,7 @@ Keys bleiben nur im Arbeitsspeicher und müssen nach jedem Neustart neu eingefü
 - **OpenRouter Image** · Bildgenerierung, optional mit Referenzbildern.
 - **OpenRouter Video** · Videogenerierung, optional mit Start-, Endbild und Referenzen.
 - **fal Image Upscale** · Vergrössert Bilder.
+- **fal Image Inpaint** · Malt den maskierten Bereich neu. Maske im Masken-Editor von «Load Image» malen, weiss = neu malen.
 - **fal Video Upscale** · Vergrössert Videos.
 - **fal Video Interpolate** · Höhere Bildrate oder Slow-Motion.
 

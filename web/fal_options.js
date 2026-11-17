@@ -6,8 +6,9 @@ const NODES = {
     MaybaumFalImageUpscale: "image_upscale",
     MaybaumFalVideoUpscale: "video_upscale",
     MaybaumFalVideoInterpolate: "video_interpolate",
+    MaybaumFalImageInpaint: "image_inpaint",
 };
-const WIDGETS = ["upscale_factor", "variant", "target_resolution", "creativity", "prompt", "target_fps", "frames_between", "slowdown_factor"];
+const WIDGETS = ["upscale_factor", "variant", "target_resolution", "creativity", "prompt", "negative_prompt", "strength", "seed", "target_fps", "frames_between", "slowdown_factor"];
 const COMBOS = ["variant", "target_resolution"];
 const CACHE_MS = 10 * 60 * 1000;
 const cache = {};
@@ -42,7 +43,7 @@ function applyParam(widget, param, defaults) {
         if (!widget.options.values.includes(widget.value)) widget.value = widget.options.values[0];
         return;
     }
-    if (widget.name === "prompt") return;
+    if (widget.name === "prompt" || widget.name === "negative_prompt") return;
     // target_fps keeps 0 as "model default".
     if (param.min != null && widget.name !== "target_fps") widget.options.min = param.min;
     if (param.max != null) widget.options.max = param.max;
